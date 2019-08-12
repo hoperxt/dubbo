@@ -1,4 +1,4 @@
-package com.hoper.rpc.server;
+package com.hoper.rpc.server.service;
 
 public class HelloServiceImpl implements HelloService {
     @Override

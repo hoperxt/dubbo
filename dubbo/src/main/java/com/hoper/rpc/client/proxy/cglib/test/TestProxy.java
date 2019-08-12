@@ -1,6 +1,6 @@
 package com.hoper.rpc.client.proxy.cglib.test;
 
-import com.hoper.rpc.client.proxy.Hello2;
+import com.hoper.rpc.client.proxy.service.Hello2;
 import com.hoper.rpc.client.proxy.cglib.ProxyCglibFactory;
 
 /**

@@ -1,8 +1,14 @@
 package com.hoper.rpc.server;
 
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
+import com.esotericsoftware.kryo.Kryo;
+import com.esotericsoftware.kryo.io.Input;
+import com.esotericsoftware.kryo.io.Output;
+import com.hoper.rpc.client.proxy.RemoteTO;
+import com.hoper.rpc.server.service.HelloService;
+import com.hoper.rpc.server.service.HelloServiceImpl;
+
+import java.io.*;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -17,22 +23,95 @@ public class Server {
 
     public static void main(String[] args) throws IOException {
         Server server = new Server();
-        server.start();
+        serviceRegistry.put(HelloService.class.getName(), HelloServiceImpl.class);
+        server.start1();
+        server.start2();
     }
 
-    public void start() throws IOException {
-        ServerSocket server = new ServerSocket();
-        server.bind(new InetSocketAddress(8000));
-        System.out.println("Server start!");
-        try {
-            while (true) {
-                Socket socket = server.accept();//阻塞线程，一直等待直到有客户端连接，可以考虑使用NIO模式
-                executor.execute(new ServiceTask(socket));
+    public void start1() {
+        new Thread(() -> {
+            ServerSocket server = null;
+            try {
+                server = new ServerSocket();
+                server.bind(new InetSocketAddress(8000));
+                System.out.println("Server start1!");
+                while (true) {
+                    Socket socket = server.accept();//阻塞线程，一直等待直到有客户端连接，可以考虑使用NIO模式
+                    executor.execute(new ServiceTask(socket));
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                try {
+                    server.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            server.close();
+        }).start();
+
+    }
+
+    public void start2() {
+        new Thread(() -> {
+            ServerSocket server = null;
+            try {
+                server = new ServerSocket();
+                server.bind(new InetSocketAddress(8001));
+                System.out.println("Server start2!");
+                while (true) {
+                    Socket socket = server.accept();//阻塞线程，一直等待直到有客户端连接，可以考虑使用NIO模式
+                    executor.execute(new ServiceTask2(socket));
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                try {
+                    server.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+    }
+
+    private static Object invoke(String serviceName, String methodName, Class<?>[] params, Object[] args) throws
+            ClassNotFoundException, NoSuchMethodException, IllegalAccessException, InstantiationException, InvocationTargetException {
+        Class serviceClass = serviceRegistry.get(serviceName);
+        if (serviceClass == null) {
+            throw new ClassNotFoundException(serviceName + " not found");
+        }
+        Method method = serviceClass.getMethod(methodName, params);
+        return method.invoke(serviceClass.newInstance(), args);
+    }
+
+    private static class ServiceTask2 implements Runnable {
+
+        Socket client;
+
+        public ServiceTask2(Socket client) {
+            this.client = client;
+        }
+
+        @Override
+        public void run() {
+            Kryo kryo = new Kryo();
+            Output output = null;
+            Input input = null;
+            try {
+                input = new Input(client.getInputStream());
+                RemoteTO to = kryo.readObject(input, RemoteTO.class);
+                String serviceName = to.getServiceName();
+                String methodName = to.getMethod();
+                Class<?>[] params = to.getParamTypes();
+                Object[] args = to.getArgs();
+                Object result = invoke(serviceName, methodName, params, args);
+                kryo.writeObject(output, result);
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                closeResource(client, output, input);
+            }
         }
 
     }
@@ -53,41 +132,33 @@ public class Server {
                 String serviceName = input.readUTF();
                 String methodName = input.readUTF();
                 Class<?>[] params = (Class<?>[]) input.readObject();
-                Object[] arguments = (Object[]) input.readObject();
-                Class serviceClass = serviceRegistry.get(serviceName);
-                if (serviceClass == null) {
-                    throw new ClassNotFoundException(serviceName + " not found");
-                }
-                Method method = serviceClass.getMethod(methodName, params);
-                Object result = method.invoke(serviceClass.newInstance(), arguments);
-
+                Object[] args = (Object[]) input.readObject();
+                Object result = invoke(serviceName, methodName, params, args);
                 output = new ObjectOutputStream(client.getOutputStream());
                 output.writeObject(result);
             } catch (Exception e) {
                 e.printStackTrace();
             } finally {
-                if (output != null) {
-                    try {
-                        output.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-                if (input != null) {
-                    try {
-                        input.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-                if (client != null) {
-                    try {
-                        client.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
+                closeResource(client, output, input);
             }
+        }
+    }
+
+    private static void closeResource(Socket socket, OutputStream output, InputStream input) {
+        try {
+            socket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        try {
+            output.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        try {
+            input.close();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 }

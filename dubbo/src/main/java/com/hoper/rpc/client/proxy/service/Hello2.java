@@ -1,4 +1,4 @@
-package com.hoper.rpc.client.proxy;
+package com.hoper.rpc.client.proxy.service;
 
 public class Hello2 {
     public void sayHello(String name) {
